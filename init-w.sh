@@ -21,7 +21,7 @@ while getopts ":i:p:j:n:s:t:" o; do
             ponum=${OPTARG} #Number of running process in this pool
             ;;
         i)
-            initpath=${OPTARG}
+            initpath=${OPTARG} 
             ;;
         j)
             numjobs=${OPTARG} #The generate file could be used by fio ,it 's numjobs for fio, here it  affects file number

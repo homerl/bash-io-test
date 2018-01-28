@@ -47,7 +47,9 @@ metatest() {
   echo 3 > /proc/sys/vm/drop_caches
   time (getfattr ./* -n user.comment) > $resdir/getfattr_${1} 2>&1
   echo 3 > /proc/sys/vm/drop_caches
-  time (chattr +i ./*) > $resdir/chattri_${1} 2>&1
+  time (chattr +ai ./*) > $resdir/chattr_add_${1} 2>&1
+  echo 3 > /proc/sys/vm/drop_caches
+  time (chattr -ai ./*) > $resdir/chattr_rm_${1} 2>&1
   echo 3 > /proc/sys/vm/drop_caches
   time (lsattr -v ./*) > $resdir/lsattr_${1} 2>&1
   echo 3 > /proc/sys/vm/drop_caches

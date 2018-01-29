@@ -29,7 +29,7 @@ done
 metatest() {
   workdir=$2"/test"$1
   mkdir -p $workdir; cd $workdir
-  time (touch 11111112222222333333333444444445555555555677777777777zzzzzzzzzkr2sfsdkfjlfk3j23ijksljfgksldf{0..65535} && touch 11111112222222333333333444444445555555555677777777777zzzzzzzzzkr2sfsdkfsdfjsidfsidfjsdfisdfjllsdfjiejlfk3j23ijksljfgksldf{65536..131070} && touch 11111112222222333333333444444445555555555677777777777zzzzzzzzzkr2sfsdkfsdfjsidfsidfjsdfisdfjllsdfjiejlfk3j23ijksljfgksldf{131071..196605} && touch 11111112222222333333333444444445555555555677777777777zzzzzzzzzkr2sfsdkfsdfjsidfsidfjsdfisdfjllsdfjiejlfk3j23ijksljfgksldf{196606..262140} ) > $resdir/touch_${1} 2>&1
+  time (touch $3{0..65535} && touch $3{65536..131070} && touch $3{131071..196605} && touch $3{196606..262140} ) > $resdir/touch_${1} 2>&1
   echo 3 > /proc/sys/vm/drop_caches
   time (ls -l > /dev/zero) > $resdir/ls_${1} 2>&1
   echo 3 > /proc/sys/vm/drop_caches
@@ -54,8 +54,8 @@ metatest() {
   time (lsattr -v ./*) > $resdir/lsattr_${1} 2>&1
   echo 3 > /proc/sys/vm/drop_caches
   time (mkdir test10;mv ./* test10) > $resdir/mv_${1} 2>&1
-  echo 3 > /proc/sys/vm/drop_caches
-  time (cd /mnt/$ipaddr/test100 && rm -rf ./test10) > $resdir/rm_${1} 2>&1
+  #echo 3 > /proc/sys/vm/drop_caches
+  #time (cd /mnt/$ipaddr/test100 && rm -rf ./test10) > $resdir/rm_${1} 2>&1
 }
 [[ -z $Npro ]] && export Npro=20
 [[ -z $total ]] && export total=100
@@ -72,7 +72,9 @@ do
         read -u7
         {
 
-                metatest $i $testdir
+                [[ $(getconf ARG_MAX) -gt 2097152 ]] && filehead="11111112222222333333333444444445555555555677777777777zzzzzzzzzkriiiiiiiiiiiiiiiiiiiiiiiiiiiii"
+                [[ $(getconf ARG_MAX) -le 2097152 ]] && filehead="hahahahahahahahahaha"
+                metatest $i $testdir $filehead
                 echo >&7
         } &
 done

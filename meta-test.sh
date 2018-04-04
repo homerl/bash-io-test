@@ -4,7 +4,7 @@
 # Author:       Homer Li
 # Modify:       Homer Li
 # Date:         2018-1-26
-# Update:       2018-4-03
+# Update:       2018-4-04
 # Email:        liyan2@genomics.org.cn
 # Usage:        $0
 # Discription:  test posix meta data performance
@@ -42,7 +42,8 @@ metatest() {
   [[ ! -d $workdir ]] && mkdir -p $workdir; cd $workdir
   set -e
   cd $workdir
-  (touch $3{0..65535} && touch $3{65536..131070} && touch $3{131071..196605} && touch $3{196606..262140} )
+  #(touch $3{0..65535} && touch $3{65536..131070} && touch $3{131071..196605} && touch $3{196606..262140} )
+  j=0;for ((i=0;i<=8388480;i=i+1048560));  do j=$((j==0?0:((j+1))));[[ $i -gt 0 ]] && echo "touch {"$j".."$i"}";j=$i; done | bash
   ### for test #(touch $3{0..15})
   randv=$(openssl rand -hex 4)
   ([[ ! -d dir ]] && mkdir dir; cd dir && for i in {0..300}; do mkdir -p $(echo ${randv}_{0..500} | tr " " "/"); done) > /dev/zero
@@ -79,12 +80,13 @@ metatest() {
   (chattr -ai $workdir/*)
   (lsattr -v $workdir/*)
   value=$RANDOM
-  (mkdir test${value};mv ./* test${value}) > /dev/zero 2>&1
-  ([[ -n $testdir ]] && cd $testdir && rm -rf ./test${value}) > /dev/zero 2>&1
+  (mkdir test${value};mv ./* test${value})
+  (du -hs test${value})
+  ([[ -n $testdir ]] && cd $testdir && rm -rf ./test${value})
   set +e
 }
-[[ -z $Npro ]] && export Npro=20
-[[ -z $total ]] && export total=100
+[[ -z $Npro ]] && export Npro=8
+[[ -z $total ]] && export total=16
 
 Pfifo="/tmp/$$.fifo"
 mkfifo $Pfifo

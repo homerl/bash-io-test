@@ -14,10 +14,10 @@ ipaddr=$(ip a | awk --posix -F '[ /]+' 'BEGIN{i=0};$0~/[0-9]{1,3}.[0-9]{1,3}.[0-
 resdir=/dev/shm/$ipaddr/mdtest
 [[ ! -d $resdir ]] && mkdir -p $resdir
 usage() {
-        echo "Usage: $0 [-d test dir] [-p process number] [-j runing jobs]" 2>&1; exit 1;
+        echo "Usage: $0 [-d test dir] [-p process number] [-j runing jobs] [-n 0  0 means rm all files, 1 means no rm]" 2>&1; exit 1;
 }
 
-while getopts ":d:p:j:" o; do
+while getopts ":d:p:j:n" o; do
     case "${o}" in
         d)
             export testdir=${OPTARG}"/"$ipaddr
@@ -27,6 +27,9 @@ while getopts ":d:p:j:" o; do
             ;;
         j)
             export Npro=${OPTARG}
+            ;;
+        n)
+            export nrm=${OPTARG}
             ;;
         *)
             usage
@@ -82,11 +85,12 @@ metatest() {
   value=$RANDOM
   (mkdir test${value};mv ./* test${value})
   (du -hs test${value})
-  ([[ -n $testdir ]] && cd $testdir && rm -rf ./test${value})
+  ([[ $nrm -eq 0 ]] && [[ -n $testdir ]] && cd $testdir && rm -rf ./test${value})
   set +e
 }
 [[ -z $Npro ]] && export Npro=8
 [[ -z $total ]] && export total=16
+[[ -z $nrm ]] && export nrm=0
 
 Pfifo="/tmp/$$.fifo"
 mkfifo $Pfifo

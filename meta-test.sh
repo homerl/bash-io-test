@@ -16,7 +16,7 @@ resdir=/dev/shm/$ipaddr/mdtest
 usage() {
         echo "Usage: $0 [-d test dir] [-p process number] [-j runing jobs] [-n 0  0 means rm all files, 1 means no rm]" 2>&1; exit 1;
 }
-
+sysctl -w fs.file-max=100000000
 while getopts ":d:p:j:n" o; do
     case "${o}" in
         d)

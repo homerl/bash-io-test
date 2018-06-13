@@ -10,18 +10,20 @@
 # Discription:  cpu/mem subsystem benchmark
 #
 ###########################################################################
-# 2018-05-08 update cd-hit and samtools, smcpp version, add megahit and mecat2pw test
-# 2018-05-08 add numa node 0 test replace single core test, because single core too slow
-# 2018-05-09 memory size check , filesytem free capacity check, add minimap2 test
-# 2018-05-10 add gcc test
+#!/bin/bash
+#
+#It contains NAS parallel benchmark, NAMD, sysbench(CPU), Openssl, pmbw, 7-zip, and some golang programs(pi, matrix compute)
+#The script will test cpu and memroy perforamnce in a compute node.
+#if you have any question , please contact liyan2@genomics.cn
+
 #add pmbw benchmark
 export BASEPATH=/sources/benchmark
 export SOCKCPU=$(grep -i "physical id" /proc/cpuinfo | sort -u | wc -l )
 export TCPU=$(lscpu | grep -i thread |  awk '{print $NF}')
 export NCPU=$(grep -c processor /proc/cpuinfo)
 export NOHTN=$(($NCPU/$TCPU)) #physical core number, no hyper threading
-export NUMANUM=$(numactl --hardware | tail -n 1 | awk -F: '{print $1}') # 2 way/4 way/8 way numa
-[[ $NUMANUM -eq 0 ]] && export NUMANUM=1
+export NUMANUM=$(numactl --hardware | tail -n 1 | awk -F: '{print $1}') # 2 way=1/4 way=3/8 way numa
+[[ $NUMANUM -eq 0 ]] && unset NUMANUM
 #export NAMDPATH=$BASEPATH/cpu/NAMD/NAMD_2.9_Linux-x86_64-multicore
 export NPBPATH=$BASEPATH/cpu/NPB3.3.1/NPB3.3-OMP
 #export CRAFTYPATH=$BASEPATH/cpu/crafty-24.1
@@ -45,7 +47,7 @@ export nohtn=$(for ((i=0;i<$(grep -c processor /proc/cpuinfo);i++)); do cat /sys
 (cpupower idle-set -d 4 && cpupower idle-set -d 3 && cpupower idle-set -d 2 && cpupower  frequency-set -g performance) > /dev/zero 2>&1
 usage()
 {
-   echo "usage $0 program-name eg: $0 init/gz/openssl/npb/pi/cd-hit/samtools/stream/linpack/smcpp/megahit/mecat2pw"
+   echo "usage $0 program-name eg: $0 init/gz/openssl/npb/pi/cd-hit/samtools/stream/linpack/smcpp/megahit/mecat2pw/minimap2"
    echo $0" all"
    exit 1
 }
@@ -71,6 +73,37 @@ checkmem () {
     export totalmem=$(awk '$0~/MemTotal/ {printf "%d\n", $(NF-1)/1024/1024}' /proc/meminfo)
 }
 
+checktemppath () {
+strlen=$(uname -r | awk -F. '$1>=3 && $2>=10{print $0}')
+if [[ ${#strlen} -gt 2 ]]
+then
+  runsize=$1
+  [[ -z $runszie ]] && export runsize=100
+  declare -A arr
+  for temppath in {/dev/shm,/tmp,/home}
+    do
+       tmpfree=$(df $temppath | awk -F'[ G]+' '$0~/\// {print $(NF-2)}')
+       arr+=( [$temppath]=$tmpfree)
+       if [[ $tmpfree -gt $runsize ]]
+       then
+           echo "enough ,the path is "${temppath}
+           echo "export $temppath, free size:"$tmpfree
+       fi
+    done
+    maxpath="/tmp"
+    maxsize=$1
+  for j in "${!arr[@]}"
+  do
+    echo "key  : $j"
+    echo "value: ${arr[$j]}"
+    [[ ${arr[$j]} -gt $maxsize ]] && export maxpath=$j && export maxsize=${arr[$j]}
+  done
+  echo "output:---"$maxpath"---maxsize:"$maxsize
+else
+  export maxpath=/tmp
+fi
+}
+
 #NAMD()
 #{
 #echo "run NAMD..."
@@ -87,10 +120,10 @@ checkmem () {
 
 GZ()
 {
-echo "run gz compress..."
 cd $MEMPATH
+echo "------------running pigz all cores------------"
 time ( pigz -11 -c $RANDOMDATA > ${RANDOMDATA}.gz) | awk '$0~/real/{print $2}'
-#rm -f $MEMPATH/*
+cd  ${MEMPATH}; rm -f ${RANDOMDATA}.gz
 }
 
 #SYSBENCH()
@@ -102,12 +135,9 @@ time ( pigz -11 -c $RANDOMDATA > ${RANDOMDATA}.gz) | awk '$0~/real/{print $2}'
 
 OPENSSL()
 {
-echo "run all openssl..."
+echo "--------------running openssl for all cores--------------"
 openssl speed aes-256-ige whirlpool des-ede3 -multi $NCPU  >/tmp/opensslog 2>&1
 tail -n 3 /tmp/opensslog | awk '{if ($0~/aes-256/) print "aes-256-ige 8192:"$NF; if ($0~/whirlpool/) print "whirlpool 8192:"$NF;  if ($0~/ede3/) print "des-ede3 8192:"$NF}'
-echo ---node0-openssl---
-[[ $(($NOHTN/$NUMANUM)) -eq $NOHTN ]] && echo only single node,exit numa test || numactl -N 0 -m 0 openssl speed aes-256-ige whirlpool des-ede3 -multi $(($NOHTN/$NUMANUM))  >/tmp/opensslog 2>&1
-tail -n 3 /tmp/opensslog | awk '{if ($0~/aes-256/) print "single core aes-256-ige 8192:"$NF; if ($0~/whirlpool/) print "single core whirlpool 8192:"$NF;  if ($0~/ede3/) print "single core des-ede3 8192:"$NF}'
 }
 
 #CRAFTY()
@@ -122,7 +152,6 @@ PMBW()
 echo "run PMBW..."
 cd $PMBWPATH
 ./pmbw -p $NCPU -P $NCPU -f ScanRead128PtrSimpleLoop p -f ScanWrite128PtrSimpleLoop -M $MEMSIZE 2>&1  | awk -F '[= \t]+' '$0~/bandwidth/{print "all_cpu_"$10,$14,$(NF-2)/1024/1024/1024" GB/s"}'
-numactl --physcpubind=${nohtn} ./pmbw -p $NOHTN -P $NOHTN -f ScanRead128PtrSimpleLoop p -f ScanWrite128PtrSimpleLoop -M $MEMSIZE 2>&1 | awk -F '[= \t]+' '$0~/bandwidth/{print "noht_cpu_"$10,$14,$(NF-2)/1024/1024/1024" GB/s"}'
 ./pmbw -p 1 -P 1 -f ScanRead128PtrSimpleLoop p -f ScanWrite128PtrSimpleLoop -M $MEMSIZE 2>&1 | awk -F '[= \t]+' '$0~/bandwidth/{print "single_core_"$10,$14,$(NF-2)/1024/1024/1024" GB/s"}'
 }
 
@@ -137,7 +166,7 @@ numactl --physcpubind=${nohtn} ./pmbw -p $NOHTN -P $NOHTN -f ScanRead128PtrSimpl
 PI()
 {
 cd $GOTESTPATH
-echo "all compute pi..."
+echo "--------running all compute pi---------"
 echo -n "pi 600G:";./600G-pi | awk -F '[ :]+' '$0~/spend time/{ print $NF}'
 }
 
@@ -152,7 +181,7 @@ echo
 
 NPB()
 {
-echo "run NPB..."
+echo "-----runnning NPB-----"
 cd $NPBPATH
 for i in $(ls bin/); do echo -n $i" Mop/s":;bin/$i | awk '$0~/Mop\/s total/{print $NF}';echo ; done
 for i in $(ls bin/); do echo -n "no ht "$i" Mop/s":;numactl --physcpubind=${nohtn} bin/$i | awk '$0~/Mop\/s total/{print $NF}';echo ; done
@@ -161,24 +190,25 @@ for i in $(ls bin/); do echo -n "no ht "$i" Mop/s":;numactl --physcpubind=${noht
 STREAM()
 {
 mem=$(awk '$0~/MemTotal/ {printf "%d\n", $(NF-1)/1024/1024/10*8*44599177}' /proc/meminfo)
-sed "s/524335808/${mem}/" /sources/benchmark/cpu/stream/stream.c
+rsync -avP /sources/benchmark/cpu/stream/stream.c_bak /sources/benchmark/cpu/stream/stream.c
+sed -i "s/524335808/${mem}/" /sources/benchmark/cpu/stream/stream.c
 echo "run STREAM..."
 cd $STREAMPATH
-make;bin/stream 2>&1 | awk '$0~/Copy/||$0~/Scale/||$0~/Add/||$0~/Triad/ {print $1": "$2" GB/s"}'
 make > /dev/zero;
 bin/stream 2>&1
-echo "---no-ht---"
+echo "---running stream no-ht---"
 numactl --physcpubind=${nohtn} bin/stream 2>&1
-echo "----node0---"
-[[ $(($NOHTN/$NUMANUM)) -eq $NOHTN ]] && echo only single node,exit numa test || numactl -N 0 -m 0 bin/stream 2>&1
-echo "---single-core---"
-numactl --physcpubind=3 -m 0 bin/stream 2>&1
+echo "----running stream in single socket---"
+[[ ! -z $NUMANUM ]] && echo only single node,exit numa test || numactl -N 0 -m 0 bin/stream
+echo "---running stream in single-core---"
+numactl --physcpubind=3 bin/stream 2>&1
 }
 
 LINPACK()
 {
 echo "run LINPACK..."
 cd $LINPACKPATH
+echo ---------running linpack all cores-----------
 ./xlinpack_xeon64 < lininput_xeon64_ao | grep -A 6 "Performance Summary" |  awk '$0~/59392/||$0~/47104/||$0~/51200/ {print "size: "$1, "No-HT(auto disable) Average (GFLops): "$4}'
 #45056 47104# problem sizes
 #45120 47168# leading dimensions
@@ -186,137 +216,155 @@ cd $LINPACKPATH
 
 SMCPP()
 {
+  checktemppath 24565756
   cd $SMCPPATH
   echo -n "SMC++ output: "
-  releasever=$(awk  '{print $(NF-1)}' /etc/redhat-release | grep -Eo ^.)
-  rsync -avP data/Med-POP18_AS_7 $MEMPATH
-  cd  /sources/benchmark/cpu/smcpp
-  (time /sources/benchmark/cpu/smcpp/smcpp-1.13.1/bin/smc++ estimate --thinning 40 --t1 100 --tK 500 --regularization-penalty 9 3e-9 ${MEMPATH}/Med-POP18_AS_7/Med.NewChr{1..20}.smc.gz)
-  rm -rf ${MEMPATH}/Med-POP18_AS_7
+  rsync -avP data/Med-POP18_AS_7 $MEMPATH > /dev/zero
+  strlen=$(uname -r | awk -F. '$1>=3 && $2>=10{print $0}')
+  if [[ ${#strlen} -gt 2 ]]
+  then
+  echo ----------------running SMCPP all cores---------------
+     rsync -avP /sources/benchmark/cpu/smcpp/smcpp-1.13.1.tar.xz $maxpath > /dev/zero
+     cd $maxpath ; tar xJvf smcpp-1.13.1.tar.xz > /dev/zero
+     echo "${maxpath}/smcpp-1.13.1/bin/smc++ estimate --thinning 40 --t1 100 --tK 500 --regularization-penalty 9 3e-9 ${MEMPATH}/Med-POP18_AS_7/Med.NewChr{1..20}.smc.gz"
+     (time ${maxpath}/smcpp-1.13.1/bin/smc++ estimate --thinning 40 --regularization-penalty 9 3e-9 ${MEMPATH}/Med-POP18_AS_7/Med.NewChr{1..20}.smc.gz >/dev/zero) 2>/tmp/SMCPP.log
+  echo ----------------running SMCPP in single socket---------------
+     echo "${maxpath}/smcpp-1.13.1_el6/bin/smc++ estimate --thinning 40 --regularization-penalty 9 3e-9 ${MEMPATH}/Med-POP18_AS_7/Med.NewChr{1..20}.smc.gz"
+     [[ ! -z $NUMANUM ]] && (time numactl -N 0 -m 0 ${maxpath}/smcpp-1.13.1/bin/smc++ estimate --thinning 40 --regularization-penalty 9 3e-9 ${MEMPATH}/Med-POP18_AS_7/Med.NewChr{1..20}.smc.gz > /dev/zero) 2>>/tmp/SMCPP.log
+  else
+     echo ----------------running SMCPP all cores---------------
+     rsync -avP /sources/benchmark/cpu/smcpp/smcpp-1.13.1_el6.tar.xz $maxpath > /dev/zero
+     cd $maxpath ; tar xJvf smcpp-1.13.1_el6.tar.xz > /dev/zero
+     (time ${maxpath}/smcpp-1.13.1_el6/bin/smc++ estimate --thinning 40 --regularization-penalty 9 3e-9 ${MEMPATH}/Med-POP18_AS_7/Med.NewChr{1..20}.smc.gz > /dev/zero) 2>/tmp/SMCPP.log
+  echo ----------------running SMCPP in single socket---------------
+     [[ ! -z $NUMANUM ]] && (time numactl -N 0 -m 0 ${maxpath}/smcpp-1.13.1_el6/bin/smc++ estimate --thinning 40 --regularization-penalty 9 3e-9 ${MEMPATH}/Med-POP18_AS_7/Med.NewChr{1..20}.smc.gz > /dev/zero)  2>/tmp/SMCPP.log
+  fi
+#  rm -rf ${MEMPATH}/Med-POP18_AS_7
 }
 
 
 SAMTOOLS()
 {
 echo "-----------install-samtools-------------------"
-cd /dev/shm
-axel -n 4 -a http://10.0.0.10/source/benchmark/cpu/samtools/samtools-1.8.tar.bz2
-tar xjvf samtools-1.8.tar.bz2
-cd samtools-1.8
-./configure --enable-plugins --enable-libcurla --prefix=/dev/shm/samtools-1.8  && make all all-htslib  && make install install-htslib > /dev/zero 2>&1
-echo "run samtools..."
-if [ ! -f $MEMPATH/Bubalus01.rmdup.bam ]
-then
-   cd $MEMPATH && axel -n 4 -a http://10.0.0.10/sources/benchmark/cpu/samtools/data/bam/Bubalus01.rmdup.bam
-fi
-samtoolsbin=/sources/benchmark/cpu/samtools/samtools-1.8/samtools
-echo --------no-ht---------
-(time numactl --physcpubind=${nohtn} $samtoolsbin sort -@ $NOHTN  ${MEMPATH}/Bubalus01.rmdup.bam > /dev/zero 2>&1) | awk '$0~/real/{print $2}'
-echo --------node0---------
-[[ $(($NOHTN/$NUMANUM)) -eq $NOHTN ]] && echo only single node,exit numa test || (time numactl -N 0 -m 0 $samtoolsbin sort -@ $(($NOHTN/$NUMANUM))  ${MEMPATH}/Bubalus01.rmdup.bam > /dev/zero 2>&1) | awk '$0~/real/{print $2}'
-#rm -f $MEMPATH"/Bubalus01.rmdup.bam"
+checktemppath 24565756
+cd $maxpath
+[[ -f ${maxpath}/samtools-1.8.tar.bz2 ]] || rsync -avP /sources/benchmark/cpu/samtools/samtools-1.8.tar.bz2 $maxpath > /dev/zero
+[[ -f ${maxpath}/bcftools-1.8.tar.bz2 ]] || rsync -avP /sources/benchmark/cpu/samtools/bcftools-1.8.tar.bz2 $maxpath > /dev/zero
+tar xjvf bcftools-1.8.tar.bz2 > /dev/zero
+cd bcftools-1.8; pwd;
+(make install; ./configure ;make -j8 ;make install) > /dev/zero
+cd $maxpath
+tar xjvf samtools-1.8.tar.bz2 > /dev/zero
+yum -y install bzip2-devel > /dev/zero
+#(make clean && ./configure --enable-plugins --enable-libcurla --prefix=${maxpath}/samtools-1.8  && make all all-htslib  && make install install-htslib) > /dev/zero
+(cd ${maxpath}/samtools-1.8; autoheader;autoconf -Wno-syntax;./configure --prefix=${maxpath}/samtools-1.8; make -j 8; make install) > /dev/zero
+[[ -f ${maxpath}/Bubalus01.rmdup.bam ]] || rsync -avP /sources/benchmark/cpu/samtools/data/bam/Bubalus01.rmdup.bam $maxpath > /dev/zero
+samtoolsbin=${maxpath}/samtools-1.8/samtools
+echo --------running samtools in single socket---------
+(time numactl -N 0 -m 0 $samtoolsbin sort -@ $(($NOHTN/$((NUMANUM+1))))  ${maxpath}/Bubalus01.rmdup.bam > /dev/zero) 2>/tmp/samtools.log
+#rm -rf ${maxpath}/Bubalus01.rmdup.bam ${maxpath}/samtools*
 }
 
 CD-HIT()
 {
 echo "-------------install-cd-hit---------------"
-cd /tmp
-axel -n 4 -a http://10.0.0.10/source/benchmark/cpu/cd-hit/cd-hit-v4.6.8-2017-1208-source.tar.gz > /dev/zero 2>&1
-tar xzf cd-hit-v4.6.8-2017-1208-source.tar.gz  > /dev/zero 2>&1
-cd cd-hit-v4.6.8-2017-1208
+checktemppath 24565756
+cdhitname="cd-hit-v4.6.8-2017-1208"
+rsync -avP /sources/benchmark/cpu/cd-hit/${cdhitname}-source.tar.gz $maxpath > /dev/zero
+cd $maxpath
+tar xzf ${cdhitname}-source.tar.gz  > /dev/zero
+cd ${cdhitname}
 make clean
-make openmp=yes
-chmod 755 /tmp/cd-hit-v4.6.6-2016-0711/cd-hit-est
-
+make openmp=yes > /dev/zero
+chmod 755 /${maxpath}/${cdhitname}/cd-hit-est
 cdhit_file=longest_orfs.cds.top_longest_5000
+cd $maxpath
+[[ ! -f ${maxpath}"/"${cdhit_file} ]] && rsync -avP /sources/benchmark/cpu/cd-hit/data/$cdhit_file $maxpath > /dev/zero
 echo "run cd-hit..."
-cd $MEMPATH
-if [ ! -f $MEMPATH"/"$cdhit_file ]
-then
-  axel -n 4 -a http://10.0.0.10/source/benchmark/cpu/cd-hit/data/$cdhit_file
-fi
-echo --------no-ht---------
-[[ $(($NOHTN/$NUMANUM)) -eq $NOHTN ]] && echo only single node,exit numa test || (time /tmp/cd-hit-v4.6.6-2016-0711/cd-hit-est -i $cdhit_file -o test -c 0.8 -M $mem40_MB -T $NOHTN) 2>&1 | awk '$0~/real/{print $2}'
-rm -f $MEMPATH"/"$cdhit_file
+echo "time numactl -m 0 -N 0 ${maxpath}/${cdhitname}/cd-hit-est -i ${maxpath}/${cdhit_file} -o test -c 0.8 -M $mem40_MB -T $(($NOHTN/$((NUMANUM+1))))"
+echo --------running cd-hit in single socket---------
+(time numactl -m 0 -N 0 ${maxpath}/${cdhitname}/cd-hit-est -i ${maxpath}"/"${cdhit_file} -o test -c 0.8 -M $mem40_MB -T $(($NOHTN/$((NUMANUM+1)))) >/dev/zero) 2>/tmp/cd-hit.log
+#rm -f ${maxpath}"/"$cdhit_file ${maxpath}/test
 }
 
 MEGAHIT()
 {
-tmpfree=$(df -h /tmp | awk -F'[ G]+' '$0~/\// {print $(NF-2)}')
-echo "-------------megahit test---------------"
-[[ $tmpfree -lt 120 ]] && echo "no enough capacity in /tmp" && return 0
+checktemppath 54565756
 megahit_file1=k67.bubble_seq.fa
 megahit_file2=k67.contigs.fa
 megahit_file3=reads.lib.bin
-temppath=/tmp/megahit
+temppath=$maxpath
 [[ ! -d $temppath ]] && mkdir $temppath
 cd $temppath
-[[ ! -f $temppath"/"$megahit_file1 ]] && axel -n 4 -a http://10.0.0.10/source/benchmark/cpu/megahit/$megahit_file1
-[[ ! -f $temppath"/"$megahit_file2 ]] && axel -n 4 -a http://10.0.0.10/source/benchmark/cpu/megahit/$megahit_file2
-[[ ! -f $temppath"/"$megahit_file3 ]] && axel -n 4 -a http://10.0.0.10/source/benchmark/cpu/megahit/$megahit_file3
-echo ----------megahit all-------------
+[[ ! -f $temppath"/"$megahit_file1 ]] && rsync -avP /sources/benchmark/cpu/megahit/$megahit_file1 $temppath > /dev/zero
+[[ ! -f $temppath"/"$megahit_file2 ]] && rsync -avP /sources/benchmark/cpu/megahit/$megahit_file2 $temppath > /dev/zero
+[[ ! -f $temppath"/"$megahit_file3 ]] && rsync -avP /sources/benchmark/cpu/megahit/$megahit_file3 $temppath > /dev/zero
 echo /sources/benchmark/cpu/megahit/megahit_v1.1.3_LINUX_CPUONLY_x86_64-bin/megahit_asm_core iterate -c ${temppath}/${megahit_file2} -b ${temppath}/${megahit_file1} -k 67  -s 10 -t $NCPU -o $temppath -r ${temppath}/${megahit_file3} -f binary
-(time /sources/benchmark/cpu/megahit/megahit_v1.1.3_LINUX_CPUONLY_x86_64-bin/megahit_asm_core iterate -c ${temppath}/${megahit_file2} -b ${temppath}/${megahit_file1} -k 67  -s 10 -t $NCPU -o $temppath -r ${temppath}/${megahit_file3} -f binary ) 2>&1 | awk '$0~/real/{print $2}'
-echo ----------numa0------------
-[[ $(($NOHTN/$NUMANUM)) -eq $NOHTN ]] && echo only single node,exit numa test || (time numactl -m 0 -N 0 /sources/benchmark/cpu/megahit/megahit_v1.1.3_LINUX_CPUONLY_x86_64-bin/megahit_asm_core iterate -c ${temppath}/${megahit_file2} -b ${temppath}/${megahit_file1} -k 67  -s 10 -t $(($NOHTN/$NUMANUM)) -o $temppath -r ${temppath}/${megahit_file3} -f binary ) 2>&1 | awk '$0~/real/{print $2}'
-rm -f /tmp/*
+echo ----------running megahit all cores-------------
+(time /sources/benchmark/cpu/megahit/megahit_v1.1.3_LINUX_CPUONLY_x86_64-bin/megahit_asm_core iterate -c ${temppath}/${megahit_file2} -b ${temppath}/${megahit_file1} -k 67  -s 10 -t $NCPU -o $temppath -r ${temppath}/${megahit_file3} -f binary >/dev/zero) 2>/tmp/megahit.log
+#echo ----------numa0------------
+#[[ ! -z $NUMANUM ]] && echo only single node,exit numa test || (time numactl -m 0 -N 0 /sources/benchmark/cpu/megahit/megahit_v1.1.3_LINUX_CPUONLY_x86_64-bin/megahit_asm_core iterate -c ${temppath}/${megahit_file2} -b ${temppath}/${megahit_file1} -k 67  -s 10 -t $(($NOHTN/$((NUMANUM+1)))) -o $temppath -r ${temppath}/${megahit_file3} -f binary > /dev/zero )
+#rm -f ${maxpath}/${megahit_file1} ${maxpath}/${megahit_file2} ${maxpath}/${megahit_file3}
 }
 
 
 MECAT2PW()
 {
-tmpfree=$(df -h /tmp | awk -F'[ G]+' '$0~/\// {print $(NF-2)}')
-[[ $tmpfree -lt 50 ]] && echo "no enough capacity in /tmp" && return 0
-echo "-------------mecat2pw test---------------"
-cd /tmp
-mecat2pwfile=all.subreads.fasta
-[[ ! -f $MEMPATH"/"$mecat2pwfile ]] && axel -n 4 -a http://10.0.0.10/source/benchmark/cpu/MECAT/all.subreads.fasta
-outdir=/sources/test100
-(time /sources/benchmark/cpu/MECAT/MECAT/Linux-amd64/bin/mecat2pw -j 0 -d /sources/test100/$mecat2pwfile -o /dev/shm/all.subreads.fasta -w mecat_reslut -t $NCPU) 2>&1 | awk '$0~/real/{print $2}'
-echo -----------node0---------------
-#echo time numactl -m 0 -N 0 /sources/benchmark/cpu/MECAT/MECAT/Linux-amd64/bin/mecat2pw -j 0 -d /sources/test100/$mecat2pwfile -o /dev/shm/all.subreads.fasta -w mecat_reslut -t $(($NOHTN/$NUMANUM))
-[[ $(($NOHTN/$NUMANUM)) -eq $NOHTN ]] && echo only single node,exit numa test || (time numactl -m 0 -N 0 /sources/benchmark/cpu/MECAT/MECAT/Linux-amd64/bin/mecat2pw -j 0 -d /sources/test100/$mecat2pwfile -o /dev/shm/all.subreads.fasta -w mecat_reslut -t $(($NOHTN/$NUMANUM))) 2>&1 | awk '$0~/real/{print $2}'
-rm -f /tmp/*
+checktemppath 514565756
+echo "-------------mecat2pw install---------------"
+cd /sources/benchmark/cpu/MECAT/MECAT; make clean ;
+cd $maxpath
+mecat2pwfile=all.subreads-2.fasta
+rsync -avP /sources/benchmark/cpu/MECAT/MECAT $maxpath > /dev/zero
+cd ${maxpath}/MECAT; make clean; make -j 8 > /dev/zero
+[[ ! -f ${maxpath}"/"${mecat2pwfile}.gz ]] && rsync -avP /sources/benchmark/cpu/MECAT/${mecat2pwfile}.bz2 $maxpath  > /dev/zero
+cd $maxpath; [[ -f all.subreads.fasta ]] || pbzip2 -d -f ${mecat2pwfile}.bz2 > /dev/zero
+echo "-------------mecat2pw all cores---------------"
+(time ${maxpath}/MECAT/Linux-amd64/bin/mecat2pw -j 0 -d ${maxpath}/${mecat2pwfile} -o ${maxpath}/${mecat2pwfile} -w ${maxpath}/mecat_reslut -t $NCPU > /dev/zero) 2>/tmp/mecat2pw.log
+#echo -----------node0---------------
+#[[ ! -z $NUMANUM ]] && echo only single node,exit numa test || (time numactl -m 0 -N 0 ${maxpath}/MECAT/Linux-amd64/bin/mecat2pw -j 0 -d ${maxpath}/${mecat2pwfile} -o ${maxpath}/${mecat2pwfile} -w ${maxpath}/mecat_reslut -t $(($NOHTN/$((NUMANUM+1)))) >/dev/zero )
+#rm -rf ${maxpath}/${mecat2pwfile} ${maxpath}/MECAT
 }
 
 
 MINIMAP2()
 {
-tmpfree=$(df -h /tmp | awk -F'[ G]+' '$0~/\// {print $(NF-2)}')
-[[ $tmpfree -lt 130 ]] && echo "no enough capacity in /tmp" && return 0
-temppath=/tmp
-[[ ! -d ${temppath} ]] && mkdir -p ${temppath}
-cd $temppath
-[[ ! -f ${temppath}/Nanopore.fastq.gz ]] && axel -n 4 -a http://10.0.0.10/source/benchmark/cpu/minimap2/test_data/Nanopore.fastq.gz
-echo ---minimap2 for Nanopore Direct RNA-seq------------
-(time /sources/benchmark/cpu/minimap2/minimap2 ${temppath}/Nanopore.fastq.gz ${temppath}/Nanopore.fastq.gz -ax splice -k14 -uf -t $NCPU) 2>&1 | awk '$0~/real/{print $2}'
-echo ---minimap2 node0------------
-[[ $(($NOHTN/$NUMANUM)) -eq $NOHTN ]] && echo only single node,exit numa test || (time numactl -m 0 -N 0 /sources/benchmark/cpu/minimap2/minimap2 ${temppath}/Nanopore.fastq.gz ${temppath}/Nanopore.fastq.gz -ax splice -k14 -uf -t $(($NOHTN/$NUMANUM))) 2>&1 | awk '$0~/real/{print $2}'
-rm -f /tmp/minipath2/*
+checktemppath 514565756
+[[ ! -d ${maxpath} ]] && mkdir -p ${maxpath}
+echo "-------------minimap2 install---------------"
+rsync -avP /sources/benchmark/cpu/minimap2 $maxpath > /dev/zero
+cd ${maxpath}/minimap2; make clean ; make -j 8 > /dev/zero
+cd $maxpath
+[[ ! -f ${maxpath}/Nanopore.fastq.gz ]] && rsync -avP /sources/benchmark/cpu/minimap2/test_data/Nanopore.fastq.gz $maxpath
+echo "-------------running minimap2 all cores---------------"
+(time ${maxpath}/minimap2/minimap2 ${maxpath}/Nanopore.fastq.gz ${maxpath}/Nanopore.fastq.gz -ax splice -k14 -uf -t $NCPU >/dev/zero) 2>/tmp/minimap2.log
+#echo ---minimap2 node0------------
+#[[ -z $NUMANUM  ]] && echo only single node,exit numa test || (time numactl -m 0 -N 0 ${maxpath}/minimap2/minimap2 ${maxpath}/Nanopore.fastq.gz ${maxpath}/Nanopore.fastq.gz -ax splice -k14 -uf -t $(($NOHTN/$((NUMANUM+1)))))
+#rm -f ${maxpath}/*gz
 }
 
 GCC()
 {
-tmpfree=$(df -h /tmp | awk -F'[ G]+' '$0~/\// {print $(NF-2)}')
-[[ $tmpfree -lt 4 ]] && echo "no enough capacity in /tmp" && return 0
-temppath=/tmp
+temppath=/dev/shm
+tmpfree=$(df -h $temppath | awk -F'[ G]+' '$0~/\// {print $(NF-2)}')
+[[ $tmpfree -lt 5 ]] && echo "no enough capacity in ${temppath}" && return 0
 cd $temppath ; pwd
-[[ ! -f ${temppath}/gcc-5.5.0.tar.xz ]] && axel -n 4 -a http://10.0.0.10/sources/benchmark/src/gcc-5.5.0.tar.xz
+[[ ! -f ${temppath}/gcc-5.5.0.tar.xz ]] && rsync -avP /sources/benchmark/src/gcc-5.5.0.tar.xz $temppath
 yum install -y gmp-devel mpfr-devel libmpc-devel
 tar xJvf gcc-5.5.0.tar.xz > /dev/zero
 cd /${temppath}/gcc-5.5.0
-make clean
-./configure --disable-multilib  --enable-languages=c,c++ --enable-libstdcxx-threads  --enable-libstdcxx-time  --enable-shared  --enable-__cxa_atexit  --disable-libunwind-exceptions --disable-libada  --host x86_64-redhat-linux-gnu  --build x86_64-redhat-linux-gnu  --with-default-libstdcxx-abi=gcc4-compatible
-echo --------make gcc------
-(time make -j $NCPU > /dev/zero) 2>&1 | awk '$0~/real/{print $2}'
+make clean > /dev/zero
+./configure --disable-multilib  --enable-languages=c,c++ --enable-libstdcxx-threads  --enable-libstdcxx-time  --enable-shared  --enable-__cxa_atexit  --disable-libunwind-exceptions --disable-libada  --host x86_64-redhat-linux-gnu  --build x86_64-redhat-linux-gnu  --with-default-libstdcxx-abi=gcc4-compatible > /dev/zero
+echo ------running gcc all cores------
+(time make -j $NCPU >/dev/zero) 2>/tmp/gcc.log
 }
 
 INITDATA()
 {
 yum -y groupinstall "Development Tools" 2 > $DEVZERO
-checkstatus
-yum -y install gcc-c++ p7zip sysbench make gcc zlib-devel ncurses-devel numactl gcc-gfortran pigz 2 > $DEVZERO
-checkstatus
+#checkstatus
+yum -y install gcc-c++ p7zip sysbench make gcc zlib-devel ncurses-devel numactl gcc-gfortran pigz pbzip2 2 > $DEVZERO
+#checkstatus
 
 #checkcmd 7za
 #checkcmd sysbench
@@ -353,7 +401,7 @@ make
 #echo "make crafty..."
 #cd $CRAFTYPATH
 #make clean
-#make target=UNIX  CC=gcc CXX=g++ opt='-DTEST -DINLINEASM -DPOPCNT -DCPUS=$NCPU'  CFLAGS='-Wall -pipe -O3 -fprofile-arcs -pthread'  CXFLAGS='-Wall -pipe -O3 -fprofile-arcs -pthread'  LDFLAGS=' -lstdc++ -fprofile-arcs -pthread -lstdc++ ' crafty-make > $DEVZERO 2>&1
+#make target=UNIX  CC=gcc CXX=g++ opt='-DTEST -DINLINEASM -DPOPCNT -DCPUS=$NCPU'  CFLAGS='-Wall -pipe -O3 -fprofile-arcs -pthread'  CXFLAGS='-Wall -pipe -O3 -fprofile-arcs -pthread'  LDFLAGS=' -lstdc++ -fprofile-arcs -pthread -lstdc++ ' crafty-make > $DEVZERO
 
 echo "make NPB..."
 cd $NPBPATH
@@ -389,7 +437,7 @@ make suite > $DEVZERO 2>&1
 main()
 {
 INITDATA
-SYSBENCH
+#SYSBENCH
 OPENSSL
 NPB
 PI
@@ -457,7 +505,7 @@ case $1 in
 		GCC
 		;;
 	all)
-		main 2>&1 | tee /tmp/cpu-bench
+		main 2>&1 | tee /tmp/cpu-bench.log
 		;;
 	-h)
 		usage
@@ -467,7 +515,7 @@ case $1 in
 		;;
 	*)
 		#main | awk --posix '$NF~/[0-9]{2}/' | tee /tmp/cpu-bench
-		main | tee /dev/shm/cpu-bench
+		main | tee /dev/shm/cpu-bench.log
                 usage
 		;;
 esac

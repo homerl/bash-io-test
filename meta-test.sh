@@ -66,9 +66,9 @@ metatest() {
   time (du -hs $workdir > /dev/zero) && echo "---du step finish---"$?
    randv=$(openssl rand -hex 8)
   time (mkdir ${testdir}"/"${randv} && mv -f ./* ${testdir}"/"${randv}) && echo "---mv finish---"
-  #echo Prepare to rmove ${testdir}${randv}
-  #echo --------------output ifrm value:$ifrm
-  #time ([[ $ifrm -eq 0 ]] && [[ -n ${testdir}"/"${randv} ]] && rm -rf ${testdir}"/"${randv} ) && echo "---rm finish---"$?
+  echo Prepare to rmove ${testdir}${randv}
+  echo --------------output ifrm value:$ifrm
+  time ([[ $ifrm -eq 0 ]] && [[ -n ${testdir}"/"${randv} ]] && rm -rf ${testdir}"/"${randv} ) && echo "---rm finish---"$?
 }
 [[ -z $Npro ]] && export Npro=8
 [[ -z $total ]] && export total=500

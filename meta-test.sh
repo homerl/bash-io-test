@@ -17,7 +17,7 @@ usage() {
         echo "Usage: $0 [-d test dir] [-p total jobs] [-j online jobs] [-n 0  0 means rm all files, 1 means no rm]" 2>&1; exit 1;
 }
 sysctl -w fs.file-max=500000
-while getopts ":d:p:j:n" o; do
+while getopts ":d:p:j:n:r" o; do
     case "${o}" in
         d)
             export testdir=${OPTARG}"/"$ipaddr
@@ -29,7 +29,7 @@ while getopts ":d:p:j:n" o; do
             export Npro=${OPTARG}
             ;;
         n)
-            export nrm=${OPTARG}
+            export ifrm=${OPTARG}
             ;;
         *)
             usage
@@ -65,12 +65,14 @@ metatest() {
   time (which prename && prename 's/$/.zip/' $workdir/* && prename 's/.zip$//' $workdir/* > /dev/zero) && echo "---rename finish---"
   time (du -hs $workdir > /dev/zero) && echo "---du step finish---"$?
    randv=$(openssl rand -hex 8)
-  time (mkdir ${testdir}/${randv} && mv -f ./* ${testdir}/${randv} > /dev/zero) && echo "---mv finish---"
-  time ([[ $nrm -eq 0 ]] && [[ -n ${testdir}/${randv} ]] && rm -rf ${testdir}/${randv} ) && echo "---rm finish---"$?
+  time (mkdir ${testdir}"/"${randv} && mv -f ./* ${testdir}"/"${randv}) && echo "---mv finish---"
+  #echo Prepare to rmove ${testdir}${randv}
+  #echo --------------output ifrm value:$ifrm
+  #time ([[ $ifrm -eq 0 ]] && [[ -n ${testdir}"/"${randv} ]] && rm -rf ${testdir}"/"${randv} ) && echo "---rm finish---"$?
 }
 [[ -z $Npro ]] && export Npro=8
 [[ -z $total ]] && export total=500
-[[ -z $nrm ]] && export nrm=1
+[[ -z $ifrm ]] && export ifrm=1
 
 Pfifo="/tmp/$$.fifo"
 mkfifo $Pfifo

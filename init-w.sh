@@ -8,8 +8,8 @@
 
 #######################################################################
 
-usage() { 
-	echo "Usage: $0 [-i create path] [-p process number] [-j fio-numjobs] [-n fio-nrfiles] [-s total size] [-t running type read,write,rw]" 1>&2; exit 1; 
+usage() {
+	echo "Usage: $0 [-i create path] [-p process number] [-j fio-numjobs] [-n fio-nrfiles] [-s total size] [-t running type read,write,rw]" 1>&2; exit 1;
 }
 
 while getopts ":i:p:j:n:s:t:" o; do
@@ -21,7 +21,7 @@ while getopts ":i:p:j:n:s:t:" o; do
             ponum=${OPTARG} #Number of running process in this pool
             ;;
         i)
-            initpath=${OPTARG} 
+            initpath=${OPTARG}
             ;;
         j)
             numjobs=${OPTARG} #The generate file could be used by fio ,it 's numjobs for fio, here it  affects file number
@@ -114,7 +114,7 @@ fi
 
 wfiles () {
 	declare -A files
-	
+
 	seqsize=$(awk -v mems="$totalsize" -v numj="$numjobs" -v nrf="$nrfiles" 'BEGIN{printf "%d",mems/numj/nrf+1}')
 	for ((j=0; j<$numjobs; j++))
 	do
@@ -128,13 +128,13 @@ wfiles () {
 	done
 
 	#create files
-	for key in ${!files[@]} 
+	for key in ${!files[@]}
 	do
 		echo ${key} ${files[${key}]} #name and size (xxGB) 1GB per loop
 		GBs=$(awk -v size="${files[${key}]}" 'BEGIN{printf "%d", size/1024}')
 		MBs=$(awk -v size="${files[${key}]}" 'BEGIN{print size%1024+1}')
 		echo $key,$GBs,$MBs #name and size (xxGB) 1GB per loop
-		
+
 		if [ $GBs -gt 0 ]
 		then
 			for ((i=0;i<=$GBs;i++)) #size+1 so we used <=, not <, file need  be large than
@@ -182,19 +182,23 @@ done
 }
 
 cpfiles () {
+echo --------cpfiles-----------$initpath
 cd $initpath
 if [ ! -f $initpath/$line-1 ]
 then
 	rm -f $initpath/$line-1
 fi
-ls -l | awk '{if(NF>2) print $NF}' | while read line
+#find ./ -type f | awk '{if(NF>2) print $NF}' | while read line
+find ./ -type f | while read line
 do
+    rand=$(openssl rand -hex 8)
+    echo -------$line
 	read -u 6
 	{
 		if [ -f $line ]
 		then
-			echo cat line to $line-1
-			cat $line > $initpath/$line-1
+			echo cat line to $line
+			cat $line > $initpath/$line-$rand
 		fi
 		echo >&6
         } &

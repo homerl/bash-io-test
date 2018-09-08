@@ -1,7 +1,7 @@
 #!/bin/bash
 timeout=400
 tmplog="tmp_logs"
-
+[[ -z $1 ]] && echo please input the dev FW version && exit 1 || devfw=$1
 [[ ! -d tmp_logs ]] && mkdir tmp_logs
 
 for rwtype in {rw,read,write,rw,randread,randwrite,randrw}
@@ -26,7 +26,7 @@ direct=1
 EOF
 echo $rwtype | grep rand && echo bssplit=4K/100 >> fio.cfg && export bssize=4K
 echo $rwtype | grep -v rand && echo bssplit=1M/100 >> fio.cfg && export bssize=1M
-          lsscsi -t | awk '$0~/sas/ && $0~/disk/ {print $NF}' | while read line;
+          lsscsi | awk -v fw="$devfw" ' {if ( match( $0, fw )) print $NF}' | while read line;
           do
              echo [job-$line] >> fio.cfg
              echo filename=$line >> fio.cfg

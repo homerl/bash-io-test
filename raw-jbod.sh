@@ -1,11 +1,10 @@
 #!/bin/bash
-timeout=300
+timeout=400
 tmplog="tmp_logs"
 
 [[ ! -d tmp_logs ]] && mkdir tmp_logs
 
-#for rwtype in {read,write,rw,randread,randwrite,randrw}
-for rwtype in {read,randread}
+for rwtype in {rw,read,write,rw,randread,randwrite,randrw}
 do
 #  for numjobs in {1,4,8}
   for numjobs in 1
@@ -14,10 +13,9 @@ cat > fio.cfg << EOF
 [global]
 rw=$rwtype
 ioengine=libaio
-#ioengine=sg
 norandommap=1
-iodepth=4
-filesize=400G
+iodepth=64
+filesize=800G
 numjobs=$numjobs
 group_reporting
 refill_buffers

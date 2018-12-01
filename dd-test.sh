@@ -54,7 +54,10 @@ do
 	if [[ $count -le 0 ]]
 	then
 		dd if=$fn of=$fn"_bak" bs=1M conv=sparse
-		sha1sum $fn $fn"_bak" >> $fn".all.sha1"
+		sha1sum $fn $fn"_bak" >> $fn".whole.sha1"
+		echo 3 > /proc/sys/vm/drop_caches
+	        sha1sum $fn $fn"_bak" >> $fn".whole.dropc.sha1"
+	        diff $fn".whole.sha1" $fn".whole.dropc.sha1"   >> $hashlog || date >> $hashlog
 		rm -f $fn"_bak"
 		export count=1000 && ((countH++)) && echo $countH > counts
 	fi

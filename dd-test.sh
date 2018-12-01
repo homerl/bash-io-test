@@ -1,5 +1,6 @@
 #!/bin/bash
 ## check sha1sum for each files
+## 20181201 because https://jira.whamcloud.com/browse/LU-11663, add drop cache in this test
 
 [[ -z $1 ]] && echo "Please input test filename." $0 " filename" && dd if=/dev/urandom of=X8dmobGzRQ bs=1M count=1024
 [[ -n fn ]] && fn=$1 || fs=X8dmobGzRQ
@@ -7,6 +8,7 @@
 count=1000
 countH=0
 sname="Bytes.sha1"
+dropcname="Bytes.drop.sha1"
 lname="Bytes.pre.sha1"
 hashlog="bad_hash"
 [[ -f $hashlog ]] && rm -f $hashlog
@@ -34,6 +36,9 @@ looptiny() {
 		[[ $flag == "sync"* ]] && dd if=$fn of=$ofname obs=1 ibs=1  count=$i oflag=sync iflag=sync
 	done
 	sha1sum *xQRj7YkDNp0Bytes > $sname
+	echo 3 > /proc/sys/vm/drop_caches
+	sha1sum *xQRj7YkDNp0Bytes > $dropcname
+	diff $sname $dropcname >> $hashlog || date >> $hashlog
         [[ ! -f $lname ]] && mv $sname $lname
 	ls | grep xQRj7YkDNp && rm -f *xQRj7YkDNp0Bytes
 	[[ -f $lname ]] && diff $sname $lname >> $hashlog || date >> $hashlog

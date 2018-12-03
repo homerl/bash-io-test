@@ -41,7 +41,7 @@ looptiny() {
 	diff $sname $dropcname >> $hashlog || date >> $hashlog
         [[ ! -f $lname ]] && mv $sname $lname
 	ls | grep xQRj7YkDNp && rm -f *xQRj7YkDNp0Bytes
-	[[ -f $lname ]] && diff $sname $lname >> $hashlog || date >> $hashlog
+	[[ ! -f $sname ]] && [[ -f $lname ]] && diff $sname $lname >> $hashlog || date >> $hashlog
 }
 
 while :
@@ -57,7 +57,7 @@ do
 		sha1sum $fn $fn"_bak" >> $fn".whole.sha1"
 		echo 3 > /proc/sys/vm/drop_caches
 	        sha1sum $fn $fn"_bak" >> $fn".whole.dropc.sha1"
-	        diff $fn".whole.sha1" $fn".whole.dropc.sha1"   >> $hashlog || date >> $hashlog
+	        [[ ! -f $fn".whole.dropc.sha1" ]] && [[ ! -f  $fn".whole.sha1" ]] && diff $fn".whole.sha1" $fn".whole.dropc.sha1"   >> $hashlog || date >> $hashlog
 		rm -f $fn"_bak"
 		export count=1000 && ((countH++)) && echo $countH > counts
 	fi
